@@ -1,0 +1,2 @@
+# Khaya-Transient-Elasticity
+This is a set of R script as supporting document for Gaoue (2015) Journal of Applied Ecology (in revision). The script allows users to conduct transient elasticity analysis and compare short versus long-term dynamics and elasticity patterns. This has been applied to data from African Mahogany (Khaya senegalensis) , a tree that is harvested by local people in West Africa for its leaves as source of fodder.
