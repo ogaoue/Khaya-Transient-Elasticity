@@ -1,0 +1,509 @@
+#############################################################
+########## Khaya Transient Growth and Elasticity ############
+## Orou G. Gaoue | ogaoue@hawaii.edu 
+## April 6, 2010, Revised Sept 12, 2010, May 5, 2014
+## Based on the code by Ezard et al. 2010. JAE
+## Last revision July 15, 2015
+
+## Clear all
+rm(list=ls(all=TRUE)) 
+
+setwd("/Users/ogaoue/Dropbox/Khaya projects/Khaya transient/")
+
+#################################
+## PART 1: DEFINING VITAL RATES 
+#################################
+
+## 1.1. Importing the data file that has the matrices
+A<-read.table("Khaya_MeanMatrices_04_07_May2014.txt")
+
+## Defining the matrices from the .txt file
+## Moist region matrices (Harvest: low, med, high)
+dog<-as.matrix(A[1:5, 1:5])
+bouk<-as.matrix(A[6:10, 1:5])
+sin<-as.matrix(A[11:15, 1:5])
+okp<-as.matrix(A[16:20, 1:5])
+pen<-as.matrix(A[21:25, 1:5])
+nip<-as.matrix(A[26:30, 1:5])
+bar<-as.matrix(A[31:35, 1:5])
+gbe<-as.matrix(A[36:40, 1:5])
+fet<-as.matrix(A[41:45, 1:5])
+nig<-as.matrix(A[46:50, 1:5])
+soa<-as.matrix(A[51:55, 1:5])
+sak<-as.matrix(A[56:60, 1:5])
+
+## 1.2. FUNCTION get vital rates from matrix elements
+
+## sigma1: Survival of seedlings
+## sigma2: Survival of saplings
+## sigma3: Survival of juveniles
+## sigma4: survival of small adults
+## sigma5: survival of large adults
+
+## gamma12: Growth from seedlings to saplings
+## gamma23: Growth from sapling to juveniles
+## gamma34: Growth from juvenile to small adults
+## gamma45: Growth from small to large adults
+
+## rho21: Shrinkage of sapling to seedlings
+## rho32: Shrinkage of juveniles to saplings
+## rho43: Shrinkage of small adults to juvenile
+## rho54: Shrinkage of large to small adults
+
+## phi4: Fertility of small adults
+## phi5: Fertility of large adults
+
+vr_calc<-function(m){
+	sigma1<-m[1,1] + m[2,1]
+	gamma12<-m[2,1]/sigma1
+
+	sigma2<-m[2,2] + m[3,2] + m[1,2]
+	gamma23<-m[3,2]/sigma2
+	rho21<-m[1,2]/sigma2
+
+	sigma3<-m[3,3] + m[4,3] + m[2,3]
+	gamma34<-m[4,3]/sigma3
+	rho32<-m[2,3]/sigma3
+
+	sigma4<-m[4,4] + m[5,4] + m[3,4]
+	gamma45<-m[5,4]/sigma4
+	rho43<-m[3,4]/sigma4
+	phi4<-m[1,4]/sigma4
+
+	sigma5<-m[5,5]+ m[4,5]
+	rho54<-m[4,5]/sigma5
+	phi5<-m[1,5]/sigma5
+
+ return(list("sigma1"=sigma1, "sigma2"=sigma2, "sigma3"=sigma3, "sigma4"=sigma4, "sigma5"=sigma5, "gamma12"=gamma12, 	"gamma23"=gamma23, "gamma34"=gamma34, "gamma45"=gamma45, 	"rho21"=rho21, "rho32"=rho32, "rho43"=rho43, "rho54"=rho54, "phi4"=phi4, "phi5"=phi5))
+}
+
+## 1.3. APPLYING the func to get the vital rates for each matrix
+dogvr<-vr_calc(dog)
+boukvr<-vr_calc(bouk)
+sinvr<-vr_calc(sin)
+okpvr<-vr_calc(okp)
+penvr<-vr_calc(pen)
+nipvr<-vr_calc(nip)
+barvr<-vr_calc(bar)
+gbevr<-vr_calc(gbe)
+fetvr<-vr_calc(fet)
+nigvr<-vr_calc(nig)
+soavr<-vr_calc(soa)
+sakvr<-vr_calc(sak)
+
+vrates<-cbind(dogvr, okpvr, sakvr, boukvr, sinvr, penvr, nigvr, soavr, gbevr, barvr, nipvr, fetvr)
+
+###############################
+##  PART 2: FUNCTION Transient 
+###############################
+
+## The function "transient" calculates the 1) asymptotic and 2) transient growth rate, the 3) damping ratio, 4) momentum and their elasticties wrt vital rates. 
+
+## Arguments: "vr": a vector of vital rates, "tL": the transient period of your choosing (e.g., 5 yrs, 10 yrs), and "n0": the initial vector. One can choose n0=SSD (stable stage distr) or n0=observed initial population structure, or n0=pop structure after disturbance (maybe only the first stage is non-zero)
+
+transient<-function(vr, n0, tL){
+		
+## Building matrix as function of vital rates
+mat<-with(vr, matrix(c(sigma1*(1-gamma12), sigma2*rho21, 0, sigma4*phi4, sigma5*phi5, sigma1*gamma12, sigma2*(1-gamma23-rho21), sigma3*rho32, 0, 0, 0, sigma2*gamma23, sigma3*(1-gamma34-rho32), sigma4*rho43, 0, 0, 0, sigma3*gamma34, sigma4*(1-gamma45-rho43), sigma5*rho54, 0, 0, 0, sigma4*gamma45, sigma5*(1-rho54)), nrow=5, byrow=TRUE))
+
+##
+sz <-dim(mat)[1]
+nPar <-length(unlist(vr))
+ln <-length(mat)
+
+## CALCULATE PARTIAL DERIVATIVES (PDE)
+## instead of using the vec operator (see Caswell 2007), the derivation is done row by row (you stack the rows insead of the columns)
+nl<-function(vl) 0 ## a null function for 0 
+
+pde.sgma1<-list(function(vl) with(vl, (1-gamma12)), nl, nl, nl, nl, function(vl) with(vl, gamma12), nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, nl)
+
+pde.sgma2<-list(nl, function(vl) with(vl, rho21), nl, nl, nl, nl, function(vl) with(vl, (1-gamma23-rho21)), nl, nl, nl, nl, function(vl) with(vl, gamma23), nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, nl)
+
+pde.sgma3<-list(nl, nl, nl, nl, nl, nl, nl, function(vl) with(vl, rho32), nl, nl, nl, nl, function(vl) with(vl, (1-gamma34-rho32)), nl, nl, nl, nl, function(vl) with(vl, gamma34), nl, nl, nl, nl, nl, nl, nl)
+
+pde.sgma4<-list(nl, nl, nl, function(vl) with(vl, phi4), nl, nl, nl, nl, nl, nl, nl, nl, nl, function(vl) with(vl, rho43), nl, nl, nl, nl, function(vl) with(vl, (1-gamma45-rho43)), nl, nl, nl, nl, function(vl) with(vl, gamma45), nl)
+
+pde.sgma5<-list(nl, nl, nl, nl, function(vl) with(vl, phi5),  nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, function(vl) with(vl, rho54), nl, nl, nl, nl, function(vl) with(vl, (1-rho54)))
+
+pde.gam12<-list(function(vl) with(vl, (-sigma1)), nl, nl, nl, nl, function(vl) with(vl, sigma1), nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, nl)
+
+pde.gam23<-list(nl, nl, nl, nl, nl, nl, function(vl) with(vl, (-sigma2)), nl, nl, nl, nl, function(vl) with(vl, sigma2), nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, nl)
+
+pde.gam34<-list(nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, function(vl) with(vl, (-sigma3)), nl, nl, nl, nl, function(vl) with(vl, sigma3), nl, nl, nl, nl, nl, nl, nl)
+
+pde.gam45<-list(nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, function(vl) with(vl, (-sigma4)), nl, nl, nl, nl, function(vl) with(vl, sigma4), nl)
+
+pde.rho21<-list(nl, function(vl) with(vl, sigma2), nl, nl, nl, nl, function(vl) with(vl, (-sigma2)), nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, nl)
+
+pde.rho32<-list(nl, nl, nl, nl, nl, nl, nl, function(vl) with(vl, sigma3), nl, nl, nl, nl, function(vl) with(vl, (-sigma3)), nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, nl)
+
+pde.rho43<-list(nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, function(vl) with(vl, (-sigma4)), nl, nl, nl, nl, function(vl) with(vl, sigma4), nl)
+
+pde.rho54<-list(nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, nl,  function(vl) with(vl, sigma5), nl, nl, nl, nl, function(vl) with(vl, (-sigma5)))
+
+pde.phi4<-list(nl, nl, nl, function(vl) with(vl, sigma4), nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, nl)
+
+pde.phi5<-list(nl, nl, nl, nl, function(vl) with(vl, sigma5), nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, nl, nl)
+
+## Creating a list of the PDEs
+pdes <- vector("list", length=nPar)
+
+pdes[[1]]<-matrix(sapply(1:ln, function(i) pde.sgma1[[i]](vr)), nrow=5, byrow=T) 
+pdes[[2]]<-matrix(sapply(1:ln, function(i) pde.sgma2[[i]](vr)), nrow=5, byrow=T)
+pdes[[3]]<-matrix(sapply(1:ln, function(i) pde.sgma3[[i]](vr)), nrow=5, byrow=T)
+pdes[[4]]<-matrix(sapply(1:ln, function(i) pde.sgma4[[i]](vr)), nrow=5, byrow=T)
+pdes[[5]]<-matrix(sapply(1:ln, function(i) pde.sgma5[[i]](vr)), nrow=5, byrow=T)
+pdes[[6]]<-matrix(sapply(1:ln, function(i) pde.gam12[[i]](vr)), nrow=5, byrow=T)
+pdes[[7]]<-matrix(sapply(1:ln, function(i) pde.gam23[[i]](vr)), nrow=5, byrow=T)
+pdes[[8]]<-matrix(sapply(1:ln, function(i) pde.gam34[[i]](vr)), nrow=5, byrow=T)
+pdes[[9]]<-matrix(sapply(1:ln, function(i) pde.gam45[[i]](vr)), nrow=5, byrow=T)
+pdes[[10]]<-matrix(sapply(1:ln, function(i) pde.rho21[[i]](vr)),nrow=5, byrow=T)
+pdes[[11]]<-matrix(sapply(1:ln, function(i) pde.rho32[[i]](vr)),nrow=5, byrow=T)
+pdes[[12]]<-matrix(sapply(1:ln, function(i) pde.rho43[[i]](vr)),nrow=5, byrow=T)
+pdes[[13]]<-matrix(sapply(1:ln, function(i) pde.rho54[[i]](vr)),nrow=5, byrow=T)
+pdes[[14]]<-matrix(sapply(1:ln, function(i) pde.phi4[[i]](vr)), nrow=5, byrow=T)
+pdes[[15]]<-matrix(sapply(1:ln, function(i) pde.phi5[[i]](vr)), nrow=5, byrow=T)
+
+## CALCULATE ASYMPTOTIC QUANTITIES  ********************
+
+# Get asymptotic sensitivities using an eigen decomposition
+A<-mat ##********
+egnK<-eigen(A)
+lmbd1<-Re(egnK$value[1])			## ASYMPTOTIC GROWTH
+w<-Re(egnK$vectors[,1])
+sad<-w/sum(w)					## STABLE-[ST]AGE DISTRIBUTION
+v<-Re(eigen(t(A))$vectors[,1])
+rv<-v/v[1]      					## REPRODUCTIVE VALUE
+temp<-as.vector(rv %*% sad)
+transp.sad<-t(sad)
+temp.mat<-rv%*%transp.sad      
+## temp.mat = tcrossprod(rv, sad)	## another method
+
+## [ASYMPTOTIC] SENSITIVITES OF lmbd1 to matrix elements
+sens<-temp.mat/temp
+
+## [ASYMPTOTIC] ELASTICITIES OF lmbd1 to matrix elements
+elas<-A*sens/lmbd1				
+
+## [ASYMPTOTIC] SENSITIVITES OF lmbd1 to lower-level rates
+llS<-sapply(1:nPar, function(i) sum(pdes[[i]]*sens))
+## ********
+rts<-unlist(vr)	## a vector of lower-level rates used
+
+##[ASYMPTOTIC] ELASTICITIES OF lmbd1 to lower-level rates
+llE <-rts*llS/lmbd1		
+
+## TRANSIENCE, an adaptation of Koons on Caswell 2007, Ecol. Lett.  **********
+
+## Set the time limit for transient calculations
+## tL<-10					
+t1 <- 1
+t2 <- (tL+1)
+## nt <- matrix(c(1,0,0,0,0), ncol=1) ## initial pop of 100% seedling
+## nt <- matrix(c(0,0,0,0,1), ncol=1) ## initial pop of 100% adults
+nt<-n0	
+	
+sz<-dim(A)[1]
+dn<-matrix(0, nrow=sz, ncol=sz^2)   ## initial value dn(0)=matrix of 0
+nOut<-matrix(0, nrow=sz, ncol=t2)
+dndvecA<-vector("list", length=t2)  ##dn/dvecA
+
+## This for loop does two things: first it iterate dn(t+1)/dvecA and n(t+1)
+for (i in 1:t2){
+	nOut[,i]<-nt
+	dndvecA[[i]]<-dn
+	dn<-A%*%dn + kronecker(t(nt),diag(1,nrow=sz)) ## update derivative
+	nt<-A%*%nt			## update population
+	}
+
+e<-matrix(1, nrow=1, ncol=sz)
+popSize<-e%*%nOut	 ## or colSums(nOut), 
+## plot(t1:t2, popSize, type='b', xlab="Time", ylab="Abundance", lwd=2, cex=2, bty='l')
+
+
+## LOWER-LEVEL ELASTICITIES TO TRANSIENT GROWTH BTW t1 and t2   ************
+## (of average growth rate between t1 and t2)
+
+dAdtheta<-matrix(0, nrow=ln, ncol=nPar)
+
+for (i in 1:nPar) {
+	dAdtheta[,i]<-as.vector(pdes[[i]])   ## dvecA/dtheta
+	}
+	
+r <- log(popSize[t2]/popSize[t1])/(t2-t1) ## mean.g.r from eq 44
+
+drdA<-(1/(t2-t1))*((e%*%dndvecA[[t2]]/popSize[t2])-(e%*%dndvecA[[t1]]/popSize[t1])) ## dr/dvecA: sensitivity of the mean r wrt a_ij and then chain rule for dr wrt lower-level
+
+drdtheta<-drdA%*%dAdtheta ## eq 45 in Caswell 2007: sensitivity of mean gr
+eretheta<-(1/r)*drdtheta%*%diag(rts) ## elasticity of mean g.r BTW t1 and t2
+
+# Not included in Caswell 2007: re-scaled L-L sensitivities for transient g.r. on numerical scale of lmbd1
+dlamdtheta<-(exp(r))*drdtheta  ## scaling sensitivity
+
+# Not included in Caswell 2007: re-scaled L-L elasticities for transient g.r. on numerical scale of lmbd1  *****************************
+elametheta<-(1/exp(r))*dlamdtheta%*%diag(rts) ## scaling elasticity
+
+#lmbdT<-exp(r)
+
+## LOWER-LEVEL DAMPING RATIO SENSITIVITIES and ELASTICITIES  ****************
+lmbd2 <- egnK$values[2]
+magd2 <- abs(lmbd2)
+rho <- lmbd1/magd2
+w2 <- egnK$vectors[,2]
+v2 <- solve(Conj(egnK$vectors))[2,]
+
+##[ASYMPTOTIC] SENSITIVITES OF lmbd2 to matrix elements
+sens2 <- Conj(v2) %*% t(w2)		
+rhoSens <- (1/magd2) * (sens - (rho/magd2) * Re(lmbd2)*Re(sens2) + Im(lmbd2)*Im(sens2)) 	## SENSITIVITIES OF rho to aij
+rhoElas <- (1/rho)*rhoSens * A		## ELASTICITIES  OF rho to aij
+
+## SENSITIVITIES OF rho to lower-level rates
+llrhoS <- sapply(1:nPar, function(i) sum(pdes[[i]]*rhoSens))
+
+## ELASTICITIES  OF rho to lower-level rates
+llrhoE <- rts/rho * llrhoS	
+
+## Synthesis *************
+tabX <- data.frame(rts, lmbd1=llE, lmbdT=as.numeric(elametheta)) # elasticities
+return(list(tabX=tabX, lmbd1=lmbd1, lambdT=exp(r), "dampTime"=-log(2)/log(1/rho), popSize=popSize))
+}
+
+###########################################################
+## APPLYING TRANSIENT FUNCTION to various region x harvest
+###########################################################
+## Define the initial function: I chose observed population str from field data.
+tL<-10
+
+## initial population structure (2 harvest states model)
+n0_mNH <-c(0.440, 0.160,	0.264, 0.068, 0.067) ## include pop: bouk,sin, pen
+n0_mHH <-c(0.334, 0.050,	0.406, 0.145, 0.064) ## include pop: dog, okp, sak
+n0_dNH <-c(0.714, 0.022,	0.089, 0.045, 0.130) ## include pop: bar, nip, fet
+n0_dHH <-c(0.325, 0.035,	0.218, 0.207, 0.216) ## include pop: gbe, nig, soa
+
+## Running the transient function for each pop
+## Moist Low Harvest: bouk, sin, pen
+Trbouk<-transient(boukvr, n0_mNH, tL)
+Trsin<-transient(sinvr, n0_mNH, tL)
+Trpen<-transient(penvr, n0_mNH, tL)
+
+## Moist - High Harvest: dog, okp, sak
+Trdog<-transient(dogvr, n0_mHH, tL)
+Trokp<-transient(okpvr, n0_mHH, tL)
+Trsak<-transient(sakvr, n0_mHH, tL)
+
+## Dry - Low Harvest: bar, nip, fet
+Trbar<-transient(barvr, n0_dNH, tL)
+Trnip<-transient(nipvr, n0_dNH, tL)
+Trfet<-transient(fetvr, n0_dNH, tL)
+
+## Dry - High Harvest: gbe, nig, soa
+Trgbe<-transient(gbevr, n0_dHH, tL)
+Trnig<-transient(nigvr, n0_dHH, tL)
+Trsoa<-transient(soavr, n0_dHH, tL)
+
+## Fig_0
+op<-par(mfrow=c(1,2))
+## Dry
+par(mar=c(5,5,4,1))
+plot(1:11, Trdog$popSize, type='l', main="Moist", ylim=c(0,3.5),xlab="Time",ylab="Abundance",col="blue",lwd=2,cex=1.2,bty='l')
+points(1:11, Trokp$popSize, type='l', col="red", lwd=2, cex=1.2, bty='l')
+points(1:11, Trsak$popSize, type='l', col="green", lwd=2, cex=1.2, bty='l')
+points(1:11, Trbouk$popSize, type='b', col="orange", lwd=2, cex=1, bty='l')
+points(1:11, Trsin$popSize, type='b', col="purple", lwd=2, cex=1, bty='l')
+points(1:11, Trpen$popSize, type='b', col="black", lwd=2, cex=1, bty='l')
+
+## Moist
+par(mar=c(5,5,4,1))
+plot(1:11,Trgbe$popSize,type='l',main="Dry", ylim=c(0,3.5),xlab="Time",ylab="",col="blue",lwd=2,cex=1.2,bty='l')
+points(1:11, Trnig$popSize, type='l', col="red", lwd=2, cex=1.2, bty='l')
+points(1:11, Trsoa$popSize, type='l', col="green", lwd=2, cex=1.2, bty='l')
+points(1:11, Trbar$popSize, type='b', col="orange", lwd=2, cex=1, bty='l')
+points(1:11, Trnip$popSize, type='b', col="purple", lwd=2, cex=1, bty='l')
+points(1:11, Trfet$popSize, type='b', col="black", lwd=2, cex=1, bty='l')
+
+par(oma=c(4, 5, 1, 0)) ## outer margin (bottom, left, top, right)
+#title(xlab="Time (years)", ylab="Abundance", outer=T, cex.lab=1.3)
+par(op)
+
+### Fig 1. A & B
+#### Asymptotic g.r: mean and CI for each group
+mean_mlhA<-mean(c(Trbouk$lmbd1, Trsin$lmbd1, Trpen$lmbd1))
+ci_mlhA<-1.96*sd(c(Trbouk$lmbd1, Trsin$lmbd1, Trpen$lmbd1))
+
+mean_mhhA<-mean(c(Trdog$lmbd1, Trokp$lmbd1, Trsak$lmbd1))
+ci_mhhA<-1.96*sd(c(Trdog$lmbd1, Trokp$lmbd1, Trsak$lmbd1))
+
+mean_dlhA<-mean(c(Trbar$lmbd1, Trnip$lmbd1, Trfet$lmbd1))
+ci_dlhA<-1.96*sd(c(Trbar$lmbd1, Trnip$lmbd1, Trfet$lmbd1))
+
+mean_dhhA<-mean(c(Trgbe$lmbd1, Trnig$lmbd1, Trsoa$lmbd1))
+ci_dhhA<-1.96*sd(c(Trgbe$lmbd1, Trnig$lmbd1, Trsoa$lmbd1))
+
+##### Transient g.r. mean and CI for each group
+mean_mlhT<-mean(c(Trbouk$lambdT, Trsin$lambdT, Trpen$lambdT))
+ci_mlhT<-1.96*sd(c(Trbouk$lambdT, Trsin$lambdT, Trpen$lambdT))
+
+mean_mhhT<-mean(c(Trdog$lambdT, Trokp$lambdT, Trsak$lambdT))
+ci_mhhT<-1.96*sd(c(Trdog$lambdT, Trokp$lambdT, Trsak$lambdT))
+
+mean_dlhT<-mean(c(Trbar$lambdT, Trnip$lambdT, Trfet$lambdT))
+ci_dlhT<-1.96*sd(c(Trbar$lambdT, Trnip$lambdT, Trfet$lambdT))
+
+mean_dhhT<-mean(c(Trgbe$lambdT, Trnig$lambdT, Trsoa$lambdT))
+ci_dhhT<-1.96*sd(c(Trgbe$lambdT, Trnig$lambdT, Trsoa$lambdT))
+
+## Building the matrix for the barplot figures
+lamMean<-matrix(c(mean_mlhA, mean_mhhA, mean_dlhA, mean_dhhA), 2, 2, byrow=F)
+lamCI<-matrix(c(ci_mlhA, ci_mhhA, ci_dlhA, ci_dhhA), 2, 2, byrow=F)
+
+lamTMean<-matrix(c(mean_mlhT, mean_mhhT, mean_dlhT, mean_dhhT), 2, 2, byrow=F)
+lamTCI<-matrix(c(ci_mlhT, ci_mhhT, ci_dlhT, ci_dhhT), 2, 2, byrow=F)
+
+dimnames(lamMean)<-dimnames(lamTMean)<-list(c("Low", "High"), c("Moist", "Dry"))
+dimnames(lamCI)<-dimnames(lamTCI)<-list(c("Low", "High"), c("Moist", "Dry"))
+
+## for FIG 1C: Transience vs Asymptotic  *****************
+## Effect of harvest on Asymptotic g.r 
+effM.A<-lamMean[1,1]-lamMean[2,1]
+effD.A<-lamMean[1,2]-lamMean[2,2]
+
+## Effect of harvest on Transient g.r
+effM.T<-lamTMean[1,1]-lamTMean[2,1]
+effD.T<-lamTMean[1,2]-lamTMean[2,2]
+
+DeltaG<-rbind(c(effM.A,effM.T), c(effD.A, effD.T))
+dimnames(DeltaG)<-list(c("Moist", "Dry"), c("Asymptotic", "Transient"))
+
+
+################################################################
+## PART 4: FIGURES *********
+
+## FIGURE 1: Asymptotic, transient g.r, *******************
+library(plotrix)
+
+op<-par(mfrow=c(2,3))
+par(mar=c(5,5,4,1))
+
+plotCI(barplot(lamMean-.7, offset=.7, ylim=c(0.7, max(lamTMean+lamTCI)+.05), col=c("grey70", "white"), cex.lab=1.4, cex.axis=1.3, las=1, cex.names=1, axis.lty=1, beside=T, xlab="Harvest intensity",ylab=expression(paste("Asymptotic growth rate, ", lambda)), legend=c("Moist", "Dry"), args.legend=list(x="topleft", bg="white", bty="n"), names.arg=c("Low", "High")), lamMean, lamCI, gap=0.001, pch=26, pt.bg=par("bg"), add=T); abline(h=1, lty=2)
+box(); mtext("(a)", side=3, adj=0)
+
+par(mar=c(5,5,4,1))
+plotCI(barplot(lamTMean-.7,offset=.7, ylim=c(0.7, max(lamTMean+lamTCI)+.05), col=c("grey70", "white"), cex.lab=1.4, cex.axis=1.3, las=1, cex.names=1, axis.lty=1, beside=T, xlab="Harvest intensity", ylab=expression(paste("Transient growth rate, ", italic(r[10]))),  names.arg=c("Low", "High")), lamTMean, lamTCI, gap=0.001, pch=26, pt.bg=par("bg"), add=T, cex.lab=1.3); abline(h=1, lty=2); box(); mtext("(b)", side=3, adj=0)
+
+par(mar=c(5,5,4,1))
+barplot(DeltaG, xlab="Type of dynamics", ylab=expression(paste("Effect size of harvest, ", Delta, lambda, " or ", Delta, italic(r[10]))),ylim=c(-0.002, 0.10), col=c("grey70", "white"), cex.lab=1.4, cex.axis=1.3, cex.names=1, axis.lty=1, beside=T); abline(h=0, lty=1); box(); mtext("(c)", side=3, adj=0)
+
+par(op)
+
+##### Elasticity  to lambda
+### Moist
+## Moist - Low
+MLowA<-matrix(0, 15, 3)
+MLowA[,1]<-Trbouk$tabX[,2]
+MLowA[,2]<-Trsin$tabX[,2]
+MLowA[,3]<-Trpen$tabX[,2]
+
+## Moist - High
+MHighA<-matrix(0, 15, 3)
+MHighA[,1]<-Trdog$tabX[,2]
+MHighA[,2]<-Trokp$tabX[,2]
+MHighA[,3]<-Trsak$tabX[,2]
+
+### Dry
+## Dry - Low
+DLowA<-matrix(0, 15, 3)
+DLowA[,1]<-Trbar$tabX[,2]
+DLowA[,2]<-Trnip$tabX[,2]
+DLowA[,3]<-Trfet$tabX[,2]
+
+## Dry - High
+DHighA<-matrix(0, 15, 3)
+DHighA[,1]<-Trgbe$tabX[,2]
+DHighA[,2]<-Trnig$tabX[,2]
+DHighA[,3]<-Trsoa$tabX[,2]
+
+##### Elasticity to transient
+## Moist
+## Moist - Low
+MLowT<-matrix(0, 15, 3)
+MLowT[,1]<-Trbouk$tabX[,3]
+MLowT[,2]<-Trsin$tabX[,3]
+MLowT[,3]<-Trpen$tabX[,3]
+
+## Moist - High
+MHighT<-matrix(0, 15, 3)
+MHighT[,1]<-Trdog$tabX[,3]
+MHighT[,2]<-Trokp$tabX[,3]
+MHighT[,3]<-Trsak$tabX[,3]
+
+## Dry
+## Dry - Low
+DLowT<-matrix(0, 15, 3)
+DLowT[,1]<-Trbar$tabX[,3]
+DLowT[,2]<-Trnip$tabX[,3]
+DLowT[,3]<-Trfet$tabX[,3]
+
+## Dry - High
+DHighT<-matrix(0, 15, 3)
+DHighT[,1]<-Trgbe$tabX[,3]
+DHighT[,2]<-Trnig$tabX[,3]
+DHighT[,3]<-Trsoa$tabX[,3]
+
+
+###### Mean and SEM
+stderr <- function(x) sqrt(var(x,na.rm=TRUE)/length(na.omit(x)))
+
+## Elast to Lambda
+MLowA_m<-apply(MLowA, 1, mean)
+MLowA_se<-apply(MLowA, 1, stderr)
+
+MHighA_m<-apply(MHighA, 1, mean)
+MHighA_se<-apply(MHighA, 1, stderr)
+
+DLowA_m<-apply(DLowA, 1, mean)
+DLowA_se<-apply(DLowA, 1, stderr)
+
+DHighA_m<-apply(DHighA, 1, mean)
+DHighA_se<-apply(DHighA, 1, stderr)
+
+## Elast to Transience
+MLowT_m<-apply(MLowT, 1, mean)
+MLowT_se<-apply(MLowT, 1, stderr)
+
+MHighT_m<-apply(MHighT, 1, mean)
+MHighT_se<-apply(MHighT, 1, stderr)
+
+DLowT_m<-apply(DLowT, 1, mean)
+DLowT_se<-apply(DLowT, 1, stderr)
+
+DHighT_m<-apply(DHighT, 1, mean)
+DHighT_se<-apply(DHighT, 1, stderr)
+
+
+### FIG 2: Elasticity of Asymptotic v Transient elasticity ******************
+
+ax<-expression(sigma[1], sigma[2], sigma[3], sigma[4], sigma[5], gamma[12], gamma[23], gamma[34], gamma[45], phi[4], phi[5]) 
+
+op<-par(mfrow=c(2,2))
+
+## Moist - Low
+par(mar=c(2.5,5,4,1))
+barplot(t(cbind(MLowA_m[-(10:13)],  MLowT_m[-(10:13)])), beside=T, axis.lty=2, main="", ylab="", xlab="", ylim=c(0,0.8), names.arg=ax,col=c("gray75","white")); mtext("(a) Moist - Low", side=3, adj=0); abline(h=0, lty=2); box()
+
+## Moist High
+par(mar=c(2.5,3.5,4,2))
+barplot(t(cbind(MHighA_m[-(10:13)], MHighT_m[-(10:13)])), beside=T, axis.lty=2, main="", ylab="", xlab="", ylim=c(0,.8), names.arg=ax,col=c("gray75","white"), legend.text=c(expression(paste("Elasticity of ", lambda)), expression(paste("Elasticity of ", italic(r)))), args.legend=list(x="topright", bg="white", bty="n")); mtext("(b) Moist - High", side=3, adj=0); abline(h=0, lty=2); box()
+
+## Dry - Low
+par(mar=c(3.5,5,1.5,1))
+barplot(t(cbind(DLowA_m[-(10:13)],  DLowT_m[-(10:13)])), beside=T, axis.lty=2, ylab="", xlab="", ylim=c(0,.8), names.arg=ax, col=c("gray75","white")); mtext("(c) Dry - Low", side=3, adj=0); abline(h=0, lty=2); box()
+
+## Dry - High
+par(mar=c(3.5,3.5,1.5,2))
+barplot(t(cbind(DHighA_m[-(10:13)], DHighT_m[-(10:13)])), beside=T, axis.lty=2, ylab="", xlab="", ylim=c(0,.8), names.arg=ax, col=c("gray75","white")); mtext("(d) Dry - High", side=3, adj=0); abline(h=0, lty=2); box()
+
+par(oma=c(4, 5, 1, 0)) ## outer margin (bottom, left, top, right)
+title(xlab=expression(paste(italic("Khaya senegalensis "), "vital rates")), ylab=expression(paste("Elasticity  of ", lambda, " or ", italic(r), " to vital rates")), outer=T, cex.lab=1.3)
+
+par(op)
+
